@@ -9,8 +9,14 @@
  */
 package org.qubership.itool.modules.git;
 
+import org.eclipse.jgit.annotations.NonNull;
 import org.eclipse.jgit.annotations.Nullable;
-import org.eclipse.jgit.api.*;
+import org.eclipse.jgit.api.CloneCommand;
+import org.eclipse.jgit.api.FetchCommand;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.InitCommand;
+import org.eclipse.jgit.api.SubmoduleInitCommand;
+import org.eclipse.jgit.api.SubmoduleUpdateCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.InvalidRemoteException;
 import org.eclipse.jgit.api.errors.JGitInternalException;
@@ -20,12 +26,25 @@ import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.internal.JGitText;
 import org.eclipse.jgit.internal.storage.file.LockFile;
-import org.eclipse.jgit.lib.*;
+import org.eclipse.jgit.internal.util.ShutdownHook;
+import org.eclipse.jgit.lib.AnyObjectId;
 import org.eclipse.jgit.lib.BranchConfig.BranchRebaseMode;
+import org.eclipse.jgit.lib.ConfigConstants;
+import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.NullProgressMonitor;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ProgressMonitor;
+import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.RefUpdate;
+import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.submodule.SubmoduleWalk;
-import org.eclipse.jgit.transport.*;
+import org.eclipse.jgit.transport.FetchResult;
+import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.transport.RemoteConfig;
+import org.eclipse.jgit.transport.TagOpt;
+import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.util.FS;
 import org.eclipse.jgit.util.FileUtils;
 
@@ -33,6 +52,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.text.MessageFormat;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -40,7 +61,7 @@ import java.util.List;
 /**
  * Clone a repository into a new working directory
  *
- * Copy-pasted from original CloneCommand to work around
+ * Copied from original CloneCommand to work around
  * the corner case when submodule is already exists in another branch,
  * but absent in current one. This implementation adds 'force' flag to
  * the command, which removes the checks for existence of repository
@@ -49,7 +70,7 @@ import java.util.List;
  * @see <a href="http://www.kernel.org/pub/software/scm/git/docs/git-clone.html"
  *      >Git documentation about Clone</a>
  */
-public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> {
+public class IToolCloneCommand extends CloneCommand {
 
 	private String uri;
 
@@ -87,6 +108,14 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 
 	private TagOpt tagOption;
 
+	private Integer depth;
+
+	private Instant shallowSince;
+
+	private List<String> shallowExcludes = new ArrayList<>();
+
+	private ShutdownHook.Listener shutdownListener = this::cleanup;
+
     private Boolean force = Boolean.FALSE;
 
     private enum FETCH_TYPE {
@@ -94,47 +123,12 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 	}
 
 	/**
-	 * Callback for status of clone operation.
-	 *
-	 * @since 4.8
-	 */
-	public interface Callback {
-		/**
-		 * Notify initialized submodules.
-		 *
-		 * @param submodules
-		 *            the submodules
-		 *
-		 */
-		void initializedSubmodules(Collection<String> submodules);
-
-		/**
-		 * Notify starting to clone a submodule.
-		 *
-		 * @param path
-		 *            the submodule path
-		 */
-		void cloningSubmodule(String path);
-
-		/**
-		 * Notify checkout of commit
-		 *
-		 * @param commit
-		 *            the id of the commit being checked out
-		 * @param path
-		 *            the submodule path
-		 */
-		void checkingOut(AnyObjectId commit, String path);
-	}
-
-	/**
 	 * Create clone command with no repository set
 	 */
 	public IToolCloneCommand() {
-		super(null);
+		super();
 	}
-
-	/**
+        /**
 	 * Get the git directory. This is primarily used for tests.
 	 *
 	 * @return the git directory
@@ -158,28 +152,23 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 	@Override
 	public Git call() throws GitAPIException, InvalidRemoteException,
 			org.eclipse.jgit.api.errors.TransportException {
-		URIish u;
-        try {
-            u = new URIish(uri);
+		URIish u = null;
+		try {
+			u = new URIish(uri);
             initDirectories(u);
             validateDirs(directory, gitDir, bare);
-        } catch (URISyntaxException e) {
-            throw new InvalidRemoteException(
-                    MessageFormat.format(JGitText.get().invalidURL, uri), e);
-        }
-		if (!force) {
+		} catch (URISyntaxException e) {
+			throw new InvalidRemoteException(
+					MessageFormat.format(JGitText.get().invalidURL, uri), e);
+		}
+        if (!force) {
             verifyDirectories();
         }
 		setFetchType();
 		@SuppressWarnings("resource") // Closed by caller
 		Repository repository = init();
 		FetchResult fetchResult = null;
-		Thread cleanupHook = new Thread(() -> cleanup());
-		try {
-			Runtime.getRuntime().addShutdownHook(cleanupHook);
-		} catch (IllegalStateException e) {
-			// ignore - the VM is already shutting down
-		}
+		ShutdownHook.INSTANCE.register(shutdownListener);
 		try {
 			fetchResult = fetch(repository, u);
 		} catch (IOException ioe) {
@@ -203,23 +192,19 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 			cleanup();
 			throw e;
 		} finally {
-			try {
-				Runtime.getRuntime().removeShutdownHook(cleanupHook);
-			} catch (IllegalStateException e) {
-				// ignore - the VM is already shutting down
-			}
+			ShutdownHook.INSTANCE.unregister(shutdownListener);
 		}
-		if (!noCheckout) {
-			try {
-				checkout(repository, fetchResult);
-			} catch (IOException ioe) {
-				repository.close();
-				throw new JGitInternalException(ioe.getMessage(), ioe);
-			} catch (GitAPIException | RuntimeException e) {
-				repository.close();
-				throw e;
-			}
+		try {
+			checkout(repository, fetchResult);
+		} catch (IOException ioe) {
+			repository.close();
+			throw new JGitInternalException(ioe.getMessage(), ioe);
+		} catch (GitAPIException | RuntimeException e) {
+			repository.close();
+			throw e;
 		}
+		// Originally makes given repository closeable by closing Git instance, but that method is package-private
+		// return new Git(repository, true);
 		return new Git(repository);
 	}
 
@@ -277,7 +262,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 			command.setGitDir(gitDir);
 		}
 		Git git = command.call();
-		// Perform the basic git repository initialization in case we already have objects in module.
+        // Perform the basic git repository initialization in case we already have objects in module.
         // This part is skipped during the init call, so have to do it manually
         if (!bare) {
             File workTree = git.getRepository().getWorkTree();
@@ -297,7 +282,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
                 }
             }
         }
-		return git.getRepository();
+        return git.getRepository();
 	}
 
 	private FetchResult fetch(Repository clonedRepo, URIish u)
@@ -331,6 +316,16 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 					fetchAll ? TagOpt.FETCH_TAGS : TagOpt.AUTO_FOLLOW);
 		}
 		command.setInitialBranch(branch);
+		if (depth != null) {
+			command.setDepth(depth.intValue());
+		}
+		if (shallowSince != null) {
+			command.setShallowSince(shallowSince);
+		}
+		// setShallowExclude is package-private, so using public alternative for setting those values
+		for (String shallowExclude : shallowExcludes) {
+			command.addShallowExclude(shallowExclude);
+		}
 		configure(command);
 
 		return command.call();
@@ -385,9 +380,8 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 				head = result.getAdvertisedRef(Constants.R_TAGS + branch);
 		}
 
-		if (head == null || head.getObjectId() == null) {
+		if (head == null || head.getObjectId() == null)
 			return; // TODO throw exception?
-		}
 
 		if (head.getName().startsWith(Constants.R_HEADS)) {
 			final RefUpdate newHead = clonedRepo.updateRef(Constants.HEAD);
@@ -403,7 +397,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 		u.setNewObjectId(commit.getId());
 		u.forceUpdate();
 
-		if (!bare) {
+		if (!bare && !noCheckout) {
 			DirCache dc = clonedRepo.lockDirCache();
 			DirCacheCheckout co = new DirCacheCheckout(clonedRepo, dc,
 					commit.getTree());
@@ -428,7 +422,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 		SubmoduleUpdateCommand update = new SubmoduleUpdateCommand(clonedRepo);
 		configure(update);
 		update.setProgressMonitor(monitor);
-		update.setCallback((CloneCommand.Callback) callback);
+		update.setCallback(callback);
 		if (!update.call().isEmpty()) {
 			SubmoduleWalk walk = SubmoduleWalk.forIndex(clonedRepo);
 			while (walk.next()) {
@@ -522,7 +516,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 	 *            the directory to clone to, or {@code null} if the directory
 	 *            name should be taken from the source uri
 	 * @return this instance
-	 * @throws IllegalStateException
+	 * @throws java.lang.IllegalStateException
 	 *             if the combination of directory, gitDir and bare is illegal.
 	 *             E.g. if for a non-bare repository directory and gitDir point
 	 *             to the same directory of if for a bare repository both
@@ -541,7 +535,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 	 *            the repository meta directory, or {@code null} to choose one
 	 *            automatically at clone time
 	 * @return this instance
-	 * @throws IllegalStateException
+	 * @throws java.lang.IllegalStateException
 	 *             if the combination of directory, gitDir and bare is illegal.
 	 *             E.g. if for a non-bare repository directory and gitDir point
 	 *             to the same directory of if for a bare repository both
@@ -560,7 +554,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 	 * @param bare
 	 *            whether the cloned repository is bare or not
 	 * @return this instance
-	 * @throws IllegalStateException
+	 * @throws java.lang.IllegalStateException
 	 *             if the combination of directory, gitDir and bare is illegal.
 	 *             E.g. if for a non-bare repository directory and gitDir point
 	 *             to the same directory of if for a bare repository both
@@ -631,7 +625,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 	 *
 	 * @see NullProgressMonitor
 	 * @param monitor
-	 *            a {@link ProgressMonitor}
+	 *            a {@link org.eclipse.jgit.lib.ProgressMonitor}
 	 * @return {@code this}
 	 */
 	public IToolCloneCommand setProgressMonitor(ProgressMonitor monitor) {
@@ -763,6 +757,82 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 		return this;
 	}
 
+	/**
+	 * Creates a shallow clone with a history truncated to the specified number
+	 * of commits.
+	 *
+	 * @param depth
+	 *            the depth
+	 * @return {@code this}
+	 *
+	 * @since 6.3
+	 */
+	public IToolCloneCommand setDepth(int depth) {
+		if (depth < 1) {
+			throw new IllegalArgumentException(JGitText.get().depthMustBeAt1);
+		}
+		this.depth = Integer.valueOf(depth);
+		return this;
+	}
+
+	/**
+	 * Creates a shallow clone with a history after the specified time.
+	 *
+	 * @param shallowSince
+	 *            the timestammp; must not be {@code null}
+	 * @return {@code this}
+	 *
+	 * @since 6.3
+	 */
+	public IToolCloneCommand setShallowSince(@NonNull OffsetDateTime shallowSince) {
+		this.shallowSince = shallowSince.toInstant();
+		return this;
+	}
+
+	/**
+	 * Creates a shallow clone with a history after the specified time.
+	 *
+	 * @param shallowSince
+	 *            the timestammp; must not be {@code null}
+	 * @return {@code this}
+	 *
+	 * @since 6.3
+	 */
+	public IToolCloneCommand setShallowSince(@NonNull Instant shallowSince) {
+		this.shallowSince = shallowSince;
+		return this;
+	}
+
+	/**
+	 * Creates a shallow clone with a history, excluding commits reachable from
+	 * a specified remote branch or tag.
+	 *
+	 * @param shallowExclude
+	 *            the ref or commit; must not be {@code null}
+	 * @return {@code this}
+	 *
+	 * @since 6.3
+	 */
+	public IToolCloneCommand addShallowExclude(@NonNull String shallowExclude) {
+		shallowExcludes.add(shallowExclude);
+		return this;
+	}
+
+	/**
+	 * Creates a shallow clone with a history, excluding commits reachable from
+	 * a specified remote branch or tag.
+	 *
+	 * @param shallowExclude
+	 *            the commit; must not be {@code null}
+	 * @return {@code this}
+	 *
+	 * @since 6.3
+	 */
+	public IToolCloneCommand addShallowExclude(@NonNull ObjectId shallowExclude) {
+		shallowExcludes.add(shallowExclude.name());
+		return this;
+	}
+
 	private static void validateDirs(File directory, File gitDir, boolean bare)
 			throws IllegalStateException {
 		if (directory != null) {
@@ -824,7 +894,7 @@ public class IToolCloneCommand extends TransportCommand<IToolCloneCommand, Git> 
 		}
 	}
 
-	void setForce(Boolean force) {
+    void setForce(Boolean force) {
         this.force = force;
     }
 }
