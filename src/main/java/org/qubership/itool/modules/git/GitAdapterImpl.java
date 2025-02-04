@@ -16,6 +16,11 @@
 
 package org.qubership.itool.modules.git;
 
+import org.eclipse.jgit.api.CreateBranchCommand;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.RmCommand;
+import org.eclipse.jgit.api.Status;
+import org.eclipse.jgit.api.SubmoduleAddCommand;
 import org.qubership.itool.modules.report.GraphReport;
 import org.qubership.itool.utils.ConfigProperties;
 import org.qubership.itool.utils.ConfigUtils;
@@ -30,10 +35,6 @@ import io.vertx.core.json.pointer.JsonPointer;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
-import org.eclipse.jgit.api.CreateBranchCommand;
-import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.RmCommand;
-import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.api.errors.RefNotFoundException;
@@ -263,7 +264,7 @@ public class GitAdapterImpl implements GitAdapter {
             String submoduleDir = superRepo.getRepository().getDirectory().toPath().getParent().toAbsolutePath()
                     .relativize(submodulePath.toAbsolutePath())
                     .toString().replaceAll("\\\\", "/");
-            IToolSubmoduleAddCommand submoduleAddCommand = new IToolSubmoduleAddCommand(superRepo.getRepository());
+            SubmoduleAddCommand submoduleAddCommand = new IToolSubmoduleAddCommand(superRepo.getRepository());
             try {
                 repository = submoduleAddCommand
                         .setCredentialsProvider(credentialsProvider)

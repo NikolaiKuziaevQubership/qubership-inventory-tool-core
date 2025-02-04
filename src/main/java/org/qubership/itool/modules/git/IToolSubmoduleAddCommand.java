@@ -11,6 +11,7 @@ package org.qubership.itool.modules.git;
 
 import org.eclipse.jgit.api.AddCommand;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.SubmoduleAddCommand;
 import org.eclipse.jgit.api.TransportCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.JGitInternalException;
@@ -43,9 +44,7 @@ import java.text.MessageFormat;
  *      "http://www.kernel.org/pub/software/scm/git/docs/git-submodule.html"
  *      >Git documentation about submodules</a>
  */
-public class IToolSubmoduleAddCommand extends
-        TransportCommand<IToolSubmoduleAddCommand, Repository> {
-
+public class IToolSubmoduleAddCommand extends SubmoduleAddCommand {
 	private String name;
 
 	private String path;
@@ -57,8 +56,7 @@ public class IToolSubmoduleAddCommand extends
     /**
 	 * Constructor for SubmoduleAddCommand.
 	 *
-	 * @param repo
-	 *            a {@link Repository} object.
+	 * @param repo a {@link Repository} object.
 	 */
 	public IToolSubmoduleAddCommand(Repository repo) {
 		super(repo);
@@ -112,18 +110,20 @@ public class IToolSubmoduleAddCommand extends
 		return this;
 	}
 
-	/**
-	 * Is the configured already a submodule in the index?
-	 *
-	 * @return true if submodule exists in index, false otherwise
-	 * @throws IOException exception
-	 */
-	protected boolean submoduleExists() throws IOException {
-		TreeFilter filter = PathFilter.create(path);
-		try (SubmoduleWalk w = SubmoduleWalk.forIndex(repo)) {
-			return w.setFilter(filter).next();
-		}
-	}
+    /**
+     * Is the configured already a submodule in the index?
+     *
+     * @return true if submodule exists in index, false otherwise
+     * @throws java.io.IOException
+     *             if an IO error occurred
+     */
+    @Override
+    protected boolean submoduleExists() throws IOException {
+        TreeFilter filter = PathFilter.create(path);
+        try (SubmoduleWalk w = SubmoduleWalk.forIndex(repo)) {
+            return w.setFilter(filter).next();
+        }
+    }
 
 	/**
 	 * {@inheritDoc}
@@ -171,10 +171,22 @@ public class IToolSubmoduleAddCommand extends
 		}
 		// Clone submodule repository
 		File moduleDirectory = SubmoduleWalk.getSubmoduleDirectory(repo, path);
+		IToolCloneCommand clone = new IToolCloneCommand();
+		configure(clone);
+		clone.setForce(true);
+		clone.setDirectory(moduleDirectory);
+		clone.setGitDir(new File(new File(repo.getCommonDirectory(),
+				Constants.MODULES), path));
+		clone.setURI(resolvedUri);
+		if (monitor != null)
+			clone.setProgressMonitor(monitor);
+		Repository subRepo = null;
+		try (Git git = clone.call()) {
+			subRepo = git.getRepository();
+			subRepo.incrementOpen();
+		}
 
-        Repository subRepo = getRepository(resolvedUri, moduleDirectory);
-
-        // Save submodule URL to parent repository's config
+		// Save submodule URL to parent repository's config
 		StoredConfig config = repo.getConfig();
 		config.setString(ConfigConstants.CONFIG_SUBMODULE_SECTION, name,
 				ConfigConstants.CONFIG_KEY_URL, resolvedUri);
@@ -211,23 +223,4 @@ public class IToolSubmoduleAddCommand extends
 
 		return subRepo;
 	}
-
-    private Repository getRepository(String resolvedUri, File moduleDirectory) throws GitAPIException {
-        Repository subRepo = null;
-        File gitDir = new File(new File(repo.getDirectory(),
-                Constants.MODULES), path);
-        IToolCloneCommand clone = new IToolCloneCommand();
-        configure(clone);
-        clone.setForce(true);
-        clone.setDirectory(moduleDirectory);
-        clone.setGitDir(gitDir);
-        clone.setURI(resolvedUri);
-        if (monitor != null)
-            clone.setProgressMonitor(monitor);
-        try (Git git = clone.call()) {
-            subRepo = git.getRepository();
-            subRepo.incrementOpen();
-        }
-        return subRepo;
-    }
 }
