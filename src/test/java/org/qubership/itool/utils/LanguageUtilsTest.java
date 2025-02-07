@@ -20,7 +20,6 @@ import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.qubership.itool.utils.LanguageUtils;
 
 import java.util.ArrayList;
 import java.util.List;

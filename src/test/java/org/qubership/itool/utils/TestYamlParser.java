@@ -21,9 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import io.vertx.core.json.JsonArray;
-import org.qubership.itool.utils.FSUtils;
-import org.qubership.itool.utils.JsonUtils;
-import org.qubership.itool.utils.YamlParser;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
