@@ -18,7 +18,6 @@ package org.qubership.itool.utils;
 
 import io.vertx.core.json.JsonObject;
 import org.junit.jupiter.api.Test;
-import org.qubership.itool.utils.TechNormalizationHelper;
 
 import java.util.List;
 

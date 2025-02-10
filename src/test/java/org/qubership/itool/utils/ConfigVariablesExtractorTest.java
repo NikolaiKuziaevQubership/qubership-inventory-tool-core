@@ -19,9 +19,6 @@ package org.qubership.itool.utils;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.qubership.itool.utils.ConfigVariablesExtractor;
-import org.qubership.itool.utils.FSUtils;
-import org.qubership.itool.utils.YamlParser;
 
 import java.io.IOException;
 import java.util.Set;
