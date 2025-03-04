@@ -32,6 +32,7 @@ import org.w3c.dom.Text;
 
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -117,9 +118,7 @@ public class LanguageUtils {
         try {
             document = XmlParser.parseXmlString(pomFileContents, "pom.xml");
             Map<String, String> properties = extractProperties(document);
-            NodeList mavenCompilerPlugin = (NodeList) xpath.compile(
-                            "/project/build/pluginManagement/plugins/plugin[artifactId='maven-compiler-plugin']")
-                    .evaluate(document, XPathConstants.NODESET);
+            NodeList mavenCompilerPlugin = findMavenCompilerPlugin(document);
             // fetch the versions
             Map<String, String> javaUsageVersions = new HashMap<>();
             for (String languageUsage : USAGES_LIST) {
@@ -157,6 +156,18 @@ public class LanguageUtils {
         } catch (Exception e) {
             graph.getReport().exceptionThrown(component, e);
         }
+    }
+
+    private static NodeList findMavenCompilerPlugin(Document document) throws XPathExpressionException {
+        NodeList mavenCompilerPlugin = (NodeList) xpath.compile(
+                        "/project/build/pluginManagement/plugins/plugin[artifactId='maven-compiler-plugin']")
+                .evaluate(document, XPathConstants.NODESET);
+        if (mavenCompilerPlugin != null && mavenCompilerPlugin.getLength() > 0) {
+            return mavenCompilerPlugin;
+        }
+        // /project/build/plugins is a valid path too
+        return (NodeList) xpath.compile("/project/build/plugins/plugin[artifactId='maven-compiler-plugin']")
+                .evaluate(document, XPathConstants.NODESET);
     }
 
     private static JsonObject updateJavaVersions(String javaUsage, JsonObject version, String javaUsageVersion, AtomicBoolean versionFound) {
