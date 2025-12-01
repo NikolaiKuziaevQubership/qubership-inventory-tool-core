@@ -32,7 +32,7 @@ jobs:
           echo "Java version: ${{ github.event.inputs.java_version }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check if tag exists
         id: check_tag
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Update pom.xml
